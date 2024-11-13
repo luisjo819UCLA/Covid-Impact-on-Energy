@@ -83,5 +83,3 @@ The analysis reveals key trends in electricity consumption before and after the 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 --- 
-
-This README provides a structured overview of your energy data project, ensuring users can understand the project's purpose and how to run it effectively.
