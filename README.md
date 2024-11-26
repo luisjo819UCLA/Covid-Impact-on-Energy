@@ -1,9 +1,9 @@
 
-# Electricity Consumption Analysis for Energy Distribution Firms
+# Electricity Consumption Analysis for Energy Distribution Firms in Peru
 
 ## Project Overview
 
-This repository provides a detailed analysis of electricity consumption data for energy distribution firms across various regions. The project processes time-series data to visualize and analyze electricity demand trends, applying techniques for data cleaning, handling missing values, and segmenting by time periods and geographic locations. 
+This repository provides a detailed analysis of electricity consumption data for energy distribution firms across various regions in Peru. The project processes time-series data to visualize and analyze electricity demand trends, applying techniques for data cleaning, handling missing values, and segmenting by time periods and geographic locations. 
 
 ## Objectives
 
