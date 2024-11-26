@@ -1,0 +1,391 @@
+---
+title: "Demanda de Distribuidoras Eléctricas"
+author: "Luis José Zapata Bobadilla"
+date: "28/4/2020"
+css: styles.css
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(openxlsx)
+library(lubridate)
+library(imputeTS)
+library(httr)
+library(ggforce)
+```
+
+## Introducción
+
+La electricidad en el país comienza generándose en los generadores,  para luego ser transportada tanto a grandes consumidores (grandes minas y fabricas) como a empresas distribuidoras. Es en las empresas distribuidoras, desde donde se *"distribuye"* la electricidad a los clientes regulados, es decir, hogares y fabricas medianas o pequeñas. 
+
+<center>
+![Forma de distribución eléctrica más común](distribuidores.png){width=400px}
+</center>
+
+El propósito de este análisis es medir la demanda energética de las empresas distribuidoras, organizando por departamento. 
+
+La demanda de las empresas distribuidoras nos da un indicador de cual es la demanda de pequeñas y medianas empresas, así como de hogares. 
+
+Los hogares consumen electricidad de forma constante en el tiempo, así que las variaciones se deberían a fluctuaciones en la demanda de pequeñas y medianas fábricas/minas/otras.
+
+El mapa eléctrico del Perú esta disponible en la pagina web del [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/MapaSEIN).
+
+<center>
+![Fuente: COES](Mapa_peru.png){width=400px}
+</center>
+
+La distribución de electricidad en el Perú toma la forma de un sistema circulatorio, en el cual las últimas ramas se expanden como un árbol. 
+Esto es debido a que usualmente las últimas ramas utilizan un sistema de distribución radial.
+
+![Existen varios sistemas de distribución, uno de ellos es el radial](radial.png)
+
+En el sistema radial, toda la electricidad demandada por la zona ingresa por un solo punto.
+
+Por ejemplo, se puede ver que en el caso de Tumbes, todas las lineas parten de la sub-estación Zorritos, y distribuyen a las subestaciones Zarumilla, Tumbes, Zorritos y Mancora.
+
+![Mapa del SEIN. Fuente: COES.](Tumbes_2.png)
+
+Como podrían adivinar, esto nos puede dar el problema de que la información se registre más de una vez. Esto lo veremos más adelante.
+
+### Fuente 
+
+Utilizaremos como data la demanda de los agentes (distribuidoras) colgadas por el COES: http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2#.
+
+Esta data muestra la demanda de las empresas distribuidoras, medida en cada punto disponible (que puede ser subestaciones, lineas de transmisión, etc.).
+
+La información obtenida de del COES consta de dos partes:
+
+1. La descripción de los puntos de medición, la cual incluye: 
+
+   i) El código de 5 números del punto de medición.
+   ii) La empresa distribuidora.
+   iii) La subestación/linea de transmisión.
+   iv) La potencia o carga que transporta ese punto.
+   v) La ubicación geográfica. 
+
+```{r,echo=FALSE,results='asis'}
+names = readRDS("names.RDS")
+names %>%
+  select(1:5) %>%
+  head(5) %>% 
+  {knitr::kable(., caption = "Información de cabecera:")}
+```
+
+2. Los datos observados en cada punto, así como la fecha y hora en la cual se midió. La información es leída cada 30 minutos, y es medida en **MW**. Para obtener una unidad por hora ([**MWh**](https://es.wikipedia.org/wiki/Megavatio-hora)), la suma de una hora debe ser dividida entre 2.
+
+```{r,echo=FALSE}
+z = readRDS("datos.RDS")
+z %>%
+  select(1:5) %>%
+  head(5) %>%
+  {knitr::kable(., caption = "Data medida en cada punto:")}
+```
+
+Finalmente, asigno cada subestación a un departamento. 
+Esta es una clasificación personal, bajo la cual considero que cada empresa de distribución tiene una región asignada sobre la cual distribuye energía. Por ejemplo, Luz del Sur solo distribuye energía en Lima. 
+
+Otras empresas tienen asignados varios departamentos, por lo que también ubico en Google Maps (y en [**OSINERMING**](https://www.osinergmin.gob.pe/newweb/uploads/Publico/MapaSEIN/)) el nombre de la subestación.
+
+```{r, echo=FALSE}
+nombres = readRDS("nombres.RDS")
+ nombres %>% 
+   sample_n(5) %>%
+  {knitr::kable(., caption = "Organización en Departamentos:")}
+```
+
+La organización por departamentos que hice puede ser descargada de [aquí](https://github.com/luis-zapata-b/Datos/raw/master/nombres.RDS).
+
+
+Una problema de sumar estos datos por departamento es que pueden ser redundantes. Como mencionamos anteriormente, algunos puntos de medición parten de otro, por ende, la información se registra dos o más veces.
+
+![Fuente: COES](Tumbes_2.png)
+
+Una forma más práctica de observar este problema, es utilizando el diagrama unifilar que muestra las conexiones directas. Este mapa también puede ser descargado de la pagina web del [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/DiagramaUnifilar). La información solo es contada más de una vez en sistemas radiales.
+
+
+![Diagrama Unifilar. Fuente: COES](Tumbes.png)
+
+En el mapa podemos observar como la demanda de las subestaciones Tumbes, Puerto Pizarro y Mancora son medidas en su totalidad por la linea **LT-6665A** hacia la subestación **Zorritos - Tumbes 60KV**.
+
+Podemos confirmarlo en la siguiente tabla: 
+
+```{r, echo=FALSE,warning=FALSE}
+plotear =  z %>%
+  mutate_if(is.character,as.double) %>%
+  mutate(Fecha = (PUNTO.DE.MEDICIÓN - minutes(30))) %>%
+  select(-PUNTO.DE.MEDICIÓN) %>%
+  mutate(Fecha2 = if_else(Fecha > dmy("15-03-2020"),"DC","AC")) %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),abs) %>%
+  group_by(Fecha2) %>%
+  ungroup() %>%
+  pivot_longer(-c(Fecha,Fecha2),names_to = "PUNTO.DE.MEDICIÓN", values_to = "gwh") %>%
+  left_join(nombres) 
+```
+
+```{r,echo=FALSE}
+plotear %>% filter(DEPARTAMENTO=="TUMBES") %>%  left_join(nombres) %>%  select(1,3,4) %>% pivot_wider(names_from = `PUNTO.DE.MEDICIÓN`,values_from = gwh) %>%  mutate(suma = .[[2]] + .[[3]] + .[[4]] + .[[5]] + .[[6]]) %>%  rename( `PUNTO.DE.MEDICIÓN` = Fecha) %>% 
+  slice(1:5) %>% 
+  {rbind(names %>%  select(PUNTO.DE.MEDICIÓN,`21588`,`21585`,`21586`,`21589`,`21590`,`21614`) %>%  mutate(suma = NA),.)} %>%
+  {knitr::kable(., caption = "Demanda - Tumbes")}
+
+```
+
+Como se puede apreciar tanto en la tabla e  como en las imágenes mostradas arriba, el punto de medición en la linea de tensión **Zorritos-Tumbes - LT6665A** ya contiene la suma de los puntos en Tumbes, Puerto Pizarro y Zarumilla.
+
+## Procesamiento
+
+
+Para esta presentación, analizaré dos intervalos de tiempo: 29 días antes del inicio de la cuarentena por el coronavirus (16 de marzo del 2020), y los 29 días siguientes.
+
+Puedes descargar los datos que utilizo desde la pagina web del [COES](http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2), o directamente desde [aquí](https://github.com/luis-zapata-b/Datos/raw/master/datos.RDS).
+
+
+La información puede presentar un sinfín de problemas:
+
+1. Valores omitidos.
+2. Valores incorrectamente ingresados (algunos números se ingresan multiplicados x10 o más).
+3. Valores atípicos (números irracionalmente diferentes que pueden durar todo un día).
+
+Como un ejemplo de como tratar con el primer tipo de error (valores omitidos) voy a utilizar los datos disponibles en **Tumbes** según mi categorización, en los cuales se pueden observar valores omitidos.
+
+<center>
+
+```{r, echo=FALSE}
+
+plotear %>% 
+  filter(DEPARTAMENTO=="TUMBES") %>%
+  mutate(PUNTO.DE.MEDICIÓN = `FECHA.HORA./.SUBESTACIÓN`) %>%
+  ggplot(aes(x=Fecha,y=gwh)) +
+  geom_line() +
+  facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22)))  +
+  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Tumbes",subtitle = "Según punto de medición de distribuidora. Valores omitidos presentes.")
+```
+</center>
+
+Visualmente se aprecia que las series tienen distinta estacionalidad: hay horas durante el día en las que se consume más electricidad y hay días en los que se consume menos electricidad (como los fines de semana). 
+
+Para poder imputar (llenar los valores ausentes) de la serie, primero debemos encontrar la frecuencia de estos efectos estacionales, para luego proceder a imputar en cada estacionalidad (por ejemplo, esta serie tiene una estacionalidad de 24 horas y otra de 7 días). El paquete [***ImputeR***](https://cran.r-project.org/web/packages/imputeR/index.html) nos permite hacer esto con la función *na_seasplit*. La teoría detrás de éste proceso no es el objetivo del análisis, sin embargo, recomiendo el libro [***"Forecasting: Principles and practice"***](https://otexts.com/fpp2/) de Rob Hyndman, así como su curso en [Data Camp](https://www.datacamp.com/courses/forecasting-using-r) si es que se quiere investigar más.
+
+<center>
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+
+limite <- function(x) ifelse(x > 300,NA,x)
+scale2 <- function(x) ifelse(x > (median(x,na.rm = TRUE) + (4 * sd(x,na.rm = TRUE))),NA,x)
+
+ploteo2 = z %>%
+  mutate_if(is.character,as.double) %>%
+  mutate(Fecha = (PUNTO.DE.MEDICIÓN - minutes(30))) %>%
+  select(-PUNTO.DE.MEDICIÓN) %>%
+  mutate(Fecha2 = if_else(Fecha > dmy("15-03-2020"),"DC","AC")) %>%
+   mutate_at(vars(-c(Fecha,Fecha2)),limite) %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),abs) %>%
+  group_by(Fecha2) %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),scale2) %>%
+  {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
+  ungroup() %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),na_ma,maxgap=47) %>%
+  pivot_longer(-c(Fecha,Fecha2),names_to = "PUNTO.DE.MEDICIÓN", values_to = "gwh") %>%
+  left_join(nombres)
+
+ploteo2 %>% 
+  filter(DEPARTAMENTO=="TUMBES") %>%
+  group_by(PUNTO.DE.MEDICIÓN) %>%
+  mutate(test = is.na(gwh)) %>%
+  mutate(gwh = na_seasplit(gwh,find_frequency = TRUE)) %>%
+  ungroup() %>%
+  mutate(PUNTO.DE.MEDICIÓN = `FECHA.HORA./.SUBESTACIÓN`) %>%
+  ggplot(aes(x=Fecha,y=gwh)) +
+  geom_line(aes(color=test),show.legend = FALSE) +
+  facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
+  scale_color_hue(l=40)  +
+  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Tumbes",subtitle = "Según punto de medición de distribuidora. Valores omitidos imputados.")
+```
+</center>
+
+Como se observa en el gráfico, los valores omitidos han sido sustituidos tomando en cuenta la estacionalidad diaria y semanal de la serie. 
+
+Una opción más rápida sería la de sumar la data por día, e imputar considerando solo la estacionalidad diaria. Esta forma será la que utilizaremos en adelante, dado que nos permite evitar errores.
+
+---
+
+Para tratar los errores de valores atípicos utilizo como ejemplo las mediciones en el departamento de Lambayeque según mi clasificación. Hay un valor atípico en el punto de medición **CAYALTI**, el cual muestra un consumo irracional por 1 día. 
+<center>
+```{r, echo=FALSE}
+plotear %>% 
+  filter(DEPARTAMENTO=="LAMBAYEQUE") %>%
+  group_by(PUNTO.DE.MEDICIÓN) %>%
+  mutate(gwh = na_ma(gwh)) %>%
+    ungroup() %>%
+  mutate(PUNTO.DE.MEDICIÓN = `FECHA.HORA./.SUBESTACIÓN`) %>%
+  ggplot(aes(x=Fecha,y=gwh)) +
+  geom_line() +
+  facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
+  scale_x_datetime(date_breaks = "23 days",date_labels = "%d-%b") +
+  ggforce::geom_mark_ellipse(aes(filter=gwh > 300),fill="red") +
+  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Lambayeque",subtitle = "Según punto de medición de distribuidora. Valores atípicos presentes.")
+
+```
+</center>
+Para evitar este tipo de error, utilizo dos filtros: 
+
+i) Primero, elimino cualquier valor que supere un consumo racional en el intervalo de medición de 30 minutos (por ejemplo, 300 MWh).
+
+ii) Segundo, elimino aquel valor que supere 4 veces la desviación estándar de cada serie. De esta forma, busco eliminar valores atípicos no recurrentes.
+
+```{r}
+limite <- function(x) ifelse(x > 300,NA,x)
+scale2 <- function(x) ifelse(x > (median(x,na.rm = TRUE) + (4 * sd(x,na.rm = TRUE))),NA,x)
+```
+
+Se puede apreciar en la siguiente imagen, como los valores atípicos en **CAYALTI** fueron eliminados, y posteriormente se ha hecho una imputación del valor omitido para rellenar la serie.
+
+Sin embargo, en el punto **TUMÁN** todavía existe un tercer tipo de error, es decir, un día arbitrariamente la data comenzó a registrarse en una escala errónea (multiplicada por 100).
+<center>
+```{r, echo=FALSE}
+ploteo2 %>% 
+  filter(DEPARTAMENTO=="LAMBAYEQUE") %>%
+  group_by(PUNTO.DE.MEDICIÓN) %>%
+  mutate(gwh = na_ma(gwh)) %>%
+    ungroup() %>%
+  mutate(PUNTO.DE.MEDICIÓN = `FECHA.HORA./.SUBESTACIÓN`) %>%
+  ggplot(aes(x=Fecha,y=gwh)) +
+  geom_line() +
+  facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
+  scale_x_datetime(date_breaks = "23 days",date_labels = "%d-%b") +
+  ggforce::geom_mark_ellipse(aes(filter=gwh > 30),fill="red")  +
+  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Lambayeque",subtitle = "Según punto de medición de distribuidora. Valores atípicos imputados")
+
+```
+</center>
+La única forma de corregir este tipo de errores es revisar visualmente las series y corregirlas manualmente. 
+Este tipo de valores atípicos puede afectar la interpretación de nuestra data. Por ejemplo, al analizar la demanda por departamento, el error de medición de Lambayeque nos puede conducir a una interpretación errónea.
+
+<center>
+```{r, echo=FALSE,warning=FALSE}
+cont = z %>%
+  mutate_if(is.character,as.double) %>%
+  mutate(Fecha = as_date(PUNTO.DE.MEDICIÓN - minutes(30))) %>%
+  select(-PUNTO.DE.MEDICIÓN) %>%
+  mutate(Fecha2 = if_else(Fecha > dmy("15-03-2020"),"DC","AC")) %>%
+   mutate_at(vars(-c(Fecha,Fecha2)),limite) %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),abs) %>%
+  group_by(Fecha2) %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),scale2) %>%
+  ungroup() %>%
+  mutate_at(vars(-c(Fecha,Fecha2)),na_ma,maxgap=47) 
+
+```
+
+```{r,warning=FALSE,echo=FALSE,message=FALSE}
+
+pordepa= cont %>%
+  {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
+  {.[, which(colMeans(.!= 0,na.rm = TRUE) > 0.5)]} %>%
+   group_by(Fecha2) %>% 
+    mutate_at(vars(-c(Fecha,Fecha2)), na_seasplit,algorithm="ma") %>% 
+  ungroup() %>% 
+  mutate_at(vars(-c(Fecha,Fecha2)), funs(. / 2000)) %>%
+  pivot_longer(-c(Fecha,Fecha2),names_to = "PUNTO.DE.MEDICIÓN",values_to = "gwh") %>%
+  left_join(nombres) %>%
+   group_by(Fecha,DEPARTAMENTO) %>%
+   summarise(gwh = sum(gwh)) %>%
+  ungroup()
+   
+factorizar = pordepa %>%
+  filter(Fecha < as_date("2020-03-15")) %>%
+  group_by(DEPARTAMENTO) %>%
+  summarise(gwh = sum(gwh)) %>%
+  arrange(gwh) %>%
+  select(DEPARTAMENTO)%>%
+  tail(7) %>%
+  {rbind(c("OTROS"),.)}
+
+nombres = mutate(nombres,DEPARTAMENTO = ifelse(nombres$DEPARTAMENTO %in% factorizar[[1]],DEPARTAMENTO,"OTROS"))
+
+```
+
+```{r,warning=FALSE,echo=FALSE,message=FALSE}
+cont %>%
+  {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
+  # {.[, which(colMeans(.!= 0,na.rm = TRUE) > 0.5)]} %>%
+   group_by(Fecha2) %>% 
+  ungroup() %>% 
+  mutate_at(vars(-c(Fecha,Fecha2)), funs(. / 2000)) %>%
+  pivot_longer(-c(Fecha,Fecha2),names_to = "PUNTO.DE.MEDICIÓN",values_to = "gwh") %>%
+  left_join(nombres) %>%
+   group_by(Fecha,DEPARTAMENTO) %>%
+   summarise(gwh = sum(gwh)) %>%
+  ungroup() %>%
+  group_by(DEPARTAMENTO) %>%
+    mutate(gwh = na_seasplit(gwh,find_frequency = TRUE)) %>% 
+  ungroup() %>%
+  ggplot(aes(x=Fecha, y =gwh)) +
+   # geom_area(aes(fill = factor(DEPARTAMENTO,levels = factorizar[[1]]))color="black",position = "stack") +
+  geom_line() +
+  facet_wrap(.~factor(DEPARTAMENTO,levels = rev(factorizar[[1]])),scales = "free_y") +
+  scale_x_date(date_breaks = "1 weeks",date_labels = "%d-%b",expand = c(0,0)) +
+  geom_vline(xintercept = as_date("2020-03-15"),size=1.5,linetype="dashed") +
+  labs(title = "Consumo Eléctrico - Empresas Distribuidoras",subtitle = "Consumo eléctrico medido en estaciones de propiedad de empresas distribuidoras.",
+       y = element_blank(),x=element_blank(),fill="Departamento", caption = "Fuente: COES. Autor: Luis José Zapata Bobadilla.") +
+  theme_gray()+
+  theme(axis.text.x.bottom = element_text(angle = 90,hjust=0.7)) +
+  ggforce::geom_mark_ellipse(aes(filter=(gwh > 4)&(DEPARTAMENTO=="LAMBAYEQUE")),fill="red")
+
+```
+</center>
+Una forma efectiva de solucionar este problema, es no tomar en cuenta cada punto de medición, sino aquel punto de medición que suma a la mayoría de puntos de medición por departamento (así como el punto Zorritos - Tumbes en el ejemplo anterior).
+
+Mucha información que se mide en el sistema es redundante, es decir, se repite. A medida que se tengan más puntos de medición, la información redundante en cada departamento aumenta exponencialmente. Si se suman la demanda por departamento sin realizar ningún filtro, algunos departamentos pueden mostrar un consumo mayor al real. Este es el caso de Lima en nuestra data.
+<center>
+```{r,warning=FALSE,echo=FALSE}
+cont %>%
+  {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
+  {.[, which(colMeans(.!= 0,na.rm = TRUE) > 0.5)]} %>%
+   group_by(Fecha2) %>% 
+  ungroup() %>% 
+  mutate_at(vars(-c(Fecha,Fecha2)), funs(. / 2000)) %>%
+  pivot_longer(-c(Fecha,Fecha2),names_to = "PUNTO.DE.MEDICIÓN",values_to = "gwh") %>%
+  left_join(nombres) %>%
+   group_by(Fecha,DEPARTAMENTO) %>%
+   summarise(gwh = sum(gwh)) %>%
+  ungroup() %>%
+  group_by(DEPARTAMENTO) %>%
+    mutate(gwh = na_seasplit(gwh,find_frequency = TRUE)) %>% 
+  ungroup() %>%
+  ggplot(aes(x=Fecha, y =gwh)) +
+  geom_area(aes(fill=factor(DEPARTAMENTO,levels = (factorizar[[1]]))),color="black") +
+   scale_x_date(date_breaks = "1 weeks",date_labels = "%d-%b",expand = c(0,0)) +
+  geom_vline(xintercept = as_date("2020-03-15"),size=1.5,linetype="dashed") +
+  labs(title = "Consumo Eléctrico - Empresas Distribuidoras",subtitle = "Consumo eléctrico medido en estaciones de propiedad de empresas distribuidoras.",
+       y = element_blank(),x=element_blank(),fill="Departamento", caption = "Fuente: COES. Autor: Luis José Zapata Bobadilla.") +
+  theme_gray() +
+  theme(axis.text.x.bottom = element_text(angle = 90,hjust=0.7))
+
+```
+</center>
+## Conclusión
+
+Como se mencionó antes, la mejor manera de evitar este tipo de problemas es considerar únicamente los puntos de medición que agrupan a la mayor cantidad de puntos de medición (como el punto Zorritos - Tumbes).
+
+Para realizar esto se requiere un conocimiento por región de cuales son los puntos que agrupan a los demás. Esto se puede hacer revisando el mapa unifilar del COES. 
+
+Se debe identificar cuales son los puntos de medición relevantes (que eviten redundancias) en cada Región. 
+
+Este es un trabajo pendiente y que permitiría realizar un análisis confiable por departamento.
+
+Cabe resaltar que el COES ya publica la información compiladas de 3 zonas del Perú  (Norte, Centro y Sur) en su Informe de Evaluación diaria ([IEOD](https://www.coes.org.pe/Portal/PostOperacion/Reportes/Ieod)) en la hoja "**Demanda por zona**". Por lo tanto, si lo que se busca es la información compilada por esas zonas, es más fácil descargarlo de la página del COES. 
+
+Al contrario, si el interés es tener la información por departamento, el acercamiento visto en este análisis sería el correcto.
+
+
+Todos los archivos en este análisis puede ser descargados del siguiente enlace:
+https://github.com/luis-zapata-b/Datos/archive/master.zip
+
+
+
+
