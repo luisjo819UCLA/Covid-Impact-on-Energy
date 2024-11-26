@@ -10,7 +10,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,cache=TRUE)
 library(tidyverse)
 library(openxlsx)
 library(lubridate)
@@ -19,100 +19,114 @@ library(httr)
 library(ggforce)
 ```
 
-## Introducción
+## Motivation
 
-La electricidad en el país comienza generándose en los generadores,  para luego ser transportada tanto a grandes consumidores (grandes minas y fabricas) como a empresas distribuidoras. Es en las empresas distribuidoras, desde donde se *"distribuye"* la electricidad a los clientes regulados, es decir, hogares y fabricas medianas o pequeñas. 
+Electricity is a cornerstone of modern life, powering industries, homes, and essential services. Understanding the demand for electricity, particularly at the distribution level, is critical for effective resource planning and optimization. Accurate analysis of electricity demand can help identify usage patterns, forecast future needs, and ensure that energy supply meets demand reliably and sustainably.
+
+In this analysis, I focus on the demand of distribution companies (empresas distribuidoras) in Peru, which serve as intermediaries between large power generators and end-users like households and businesses. By studying the demand at the departmental (regional) level, this work provides valuable insights into how energy is consumed across different areas.
+
+The outcomes of such an analysis are highly relevant for:
+
+- **Policy-making**: Supporting government efforts to ensure equitable energy distribution and address regional disparities in electricity access.
+- **Investment decisions**: Assisting energy companies in identifying regions that require infrastructure upgrades or additional capacity.
+- **Sustainability**: Highlighting opportunities for renewable energy integration and reducing inefficiencies in the power grid.
+
+By combining robust data analysis techniques with domain-specific knowledge, this project demonstrates a practical approach to tackling real-world challenges in the energy sector. This type of analysis is not only adaptable to electricity but can also be extended to other resource management problems, showcasing the versatility of data-driven solutions.
+
+
+## Introduction
+
+Electricity in the country starts being generated at the generators, and then it is transported to both large consumers (such as large mines and factories) and distribution companies (empresas distribuidoras). It is through these distribution companies (empresas distribuidoras) that electricity is *"distributed"* to regulated customers, such as households and medium or small factories.
 
 <center>
-![Forma de distribución eléctrica más común](distribuidores.png){width=400px}
+![Most common form of electricity distribution](distribuidores.png){width=400px}
 </center>
 
-El propósito de este análisis es medir la demanda energética de las empresas distribuidoras, organizando por departamento. 
+The purpose of this analysis is to measure the energy demand of the distribution companies (empresas distribuidoras), organized by department (departamento), in Peru.
 
-La demanda de las empresas distribuidoras nos da un indicador de cual es la demanda de pequeñas y medianas empresas, así como de hogares. 
+The demand of distribution companies (empresas distribuidoras) gives us an indicator of the demand from small and medium-sized businesses, as well as households.
 
-Los hogares consumen electricidad de forma constante en el tiempo, así que las variaciones se deberían a fluctuaciones en la demanda de pequeñas y medianas fábricas/minas/otras.
+Households consume electricity constantly over time, so variations should be attributed to fluctuations in the demand from small and medium-sized factories/mines/others.
 
-El mapa eléctrico del Perú esta disponible en la pagina web del [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/MapaSEIN).
+The electrical map (mapa eléctrico) of Peru is available on the [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/MapaSEIN) website.
 
 <center>
-![Fuente: COES](Mapa_peru.png){width=400px}
+![Source: COES](Mapa_peru.png){width=400px}
 </center>
 
-La distribución de electricidad en el Perú toma la forma de un sistema circulatorio, en el cual las últimas ramas se expanden como un árbol. 
-Esto es debido a que usualmente las últimas ramas utilizan un sistema de distribución radial.
+The distribution of electricity in Peru takes the form of a circulatory system, in which the final branches expand like a tree. 
+This is because the final branches typically use a radial distribution system (sistema de distribución radial).
 
-![Existen varios sistemas de distribución, uno de ellos es el radial](radial.png)
+![There are several distribution systems, one of them is the radial system](radial.png)
 
-En el sistema radial, toda la electricidad demandada por la zona ingresa por un solo punto.
+In the radial system (sistema radial), all the electricity demanded in the area enters through a single point.
 
-Por ejemplo, se puede ver que en el caso de Tumbes, todas las lineas parten de la sub-estación Zorritos, y distribuyen a las subestaciones Zarumilla, Tumbes, Zorritos y Mancora.
+For example, in the case of Tumbes, all the lines originate from the Zorritos substation (sub-estación Zorritos) and distribute electricity to the Zarumilla, Tumbes, Zorritos, and Mancora substations (subestaciones Zarumilla, Tumbes, Zorritos y Mancora).
 
-![Mapa del SEIN. Fuente: COES.](Tumbes_2.png)
+![SEIN Map (Mapa del SEIN). Source: COES.](Tumbes_2.png)
 
-Como podrían adivinar, esto nos puede dar el problema de que la información se registre más de una vez. Esto lo veremos más adelante.
+As you might guess, this can lead to the problem of information being recorded more than once. We will explore this issue later.
 
-### Fuente 
 
-Utilizaremos como data la demanda de los agentes (distribuidoras) colgadas por el COES: http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2#.
+### Source
 
-Esta data muestra la demanda de las empresas distribuidoras, medida en cada punto disponible (que puede ser subestaciones, lineas de transmisión, etc.).
+We will use as data the demand from agents (distributors) published by COES: http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2#.
 
-La información obtenida de del COES consta de dos partes:
+This dataset shows the demand of distribution companies (empresas distribuidoras), measured at each available point (which could be substations, transmission lines, etc.).
 
-1. La descripción de los puntos de medición, la cual incluye: 
+The information obtained from COES consists of two parts:
 
-   i) El código de 5 números del punto de medición.
-   ii) La empresa distribuidora.
-   iii) La subestación/linea de transmisión.
-   iv) La potencia o carga que transporta ese punto.
-   v) La ubicación geográfica. 
+1. The description of the measurement points, which includes: 
+
+   i) The 5-digit code of the measurement point.  
+   ii) The distribution company (empresa distribuidora).  
+   iii) The substation/transmission line (subestación/linea de transmisión).  
+   iv) The power or load transported by that point.  
+   v) The geographical location.  
 
 ```{r,echo=FALSE,results='asis'}
 names = readRDS("names.RDS")
 names %>%
   select(1:5) %>%
   head(5) %>% 
-  {knitr::kable(., caption = "Información de cabecera:")}
+  {knitr::kable(., caption = "Header Information (Información de cabecera):")}
 ```
 
-2. Los datos observados en cada punto, así como la fecha y hora en la cual se midió. La información es leída cada 30 minutos, y es medida en **MW**. Para obtener una unidad por hora ([**MWh**](https://es.wikipedia.org/wiki/Megavatio-hora)), la suma de una hora debe ser dividida entre 2.
+2. The observed data at each point, including the date and time when it was measured. The information is recorded every 30 minutes and is measured in **MW**. To obtain a unit per hour ([**MWh**](https://es.wikipedia.org/wiki/Megavatio-hora)), the sum of one hour must be divided by 2.
 
 ```{r,echo=FALSE}
 z = readRDS("datos.RDS")
 z %>%
   select(1:5) %>%
   head(5) %>%
-  {knitr::kable(., caption = "Data medida en cada punto:")}
+  {knitr::kable(., caption = "Data measured at each point (Data medida en cada punto):")}
 ```
 
-Finalmente, asigno cada subestación a un departamento. 
-Esta es una clasificación personal, bajo la cual considero que cada empresa de distribución tiene una región asignada sobre la cual distribuye energía. Por ejemplo, Luz del Sur solo distribuye energía en Lima. 
+Finally, I assign each substation (subestación) to a geographical department (departamento).  
+This is a personal classification, under which I consider that each distribution company (empresa distribuidora) has an assigned region where it distributes energy. For example, Luz del Sur only distributes energy in Lima.
 
-Otras empresas tienen asignados varios departamentos, por lo que también ubico en Google Maps (y en [**OSINERMING**](https://www.osinergmin.gob.pe/newweb/uploads/Publico/MapaSEIN/)) el nombre de la subestación.
+Other companies (empresas) are assigned to multiple departments (departamentos), so I also use Google Maps and [**OSINERMING**](https://www.osinergmin.gob.pe/newweb/uploads/Publico/MapaSEIN/) to locate the names of the substations (subestaciones).
 
 ```{r, echo=FALSE}
 nombres = readRDS("nombres.RDS")
  nombres %>% 
    sample_n(5) %>%
-  {knitr::kable(., caption = "Organización en Departamentos:")}
+  {knitr::kable(., caption = "Organization by Departments (Organización en Departamentos):")}
 ```
 
-La organización por departamentos que hice puede ser descargada de [aquí](https://github.com/luis-zapata-b/Datos/raw/master/nombres.RDS).
+The organization by departments (departamentos) I created can be downloaded [here](https://github.com/luis-zapata-b/Datos/raw/master/nombres.RDS).
 
+One problem with summing this data by department (departamento) is that it can be redundant. As mentioned earlier, some measurement points (puntos de medición) originate from others, meaning the information is recorded two or more times.
 
-Una problema de sumar estos datos por departamento es que pueden ser redundantes. Como mencionamos anteriormente, algunos puntos de medición parten de otro, por ende, la información se registra dos o más veces.
+[Source: COES (Fuente: COES)](Tumbes_2.png)
 
-![Fuente: COES](Tumbes_2.png)
+A more practical way to observe this issue is by using the single-line diagram (diagrama unifilar) that shows direct connections. This map can also be downloaded from the [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/DiagramaUnifilar) website. Information is only counted more than once in radial systems (sistemas radiales).
 
-Una forma más práctica de observar este problema, es utilizando el diagrama unifilar que muestra las conexiones directas. Este mapa también puede ser descargado de la pagina web del [**COES**](https://www.coes.org.pe/Portal/Operacion/CaractSEIN/DiagramaUnifilar). La información solo es contada más de una vez en sistemas radiales.
+![Single-Line Diagram (Diagrama Unifilar). Source: COES (Fuente: COES)](Tumbes.png)
 
+On the map, we can see how the demand of the Tumbes, Puerto Pizarro, and Mancora substations (subestaciones) is measured entirely by the line **LT-6665A** towards the **Zorritos - Tumbes 60KV** substation (subestación).
 
-![Diagrama Unifilar. Fuente: COES](Tumbes.png)
-
-En el mapa podemos observar como la demanda de las subestaciones Tumbes, Puerto Pizarro y Mancora son medidas en su totalidad por la linea **LT-6665A** hacia la subestación **Zorritos - Tumbes 60KV**.
-
-Podemos confirmarlo en la siguiente tabla: 
+We can confirm this in the following table:
 
 ```{r, echo=FALSE,warning=FALSE}
 plotear =  z %>%
@@ -131,27 +145,25 @@ plotear =  z %>%
 plotear %>% filter(DEPARTAMENTO=="TUMBES") %>%  left_join(nombres) %>%  select(1,3,4) %>% pivot_wider(names_from = `PUNTO.DE.MEDICIÓN`,values_from = gwh) %>%  mutate(suma = .[[2]] + .[[3]] + .[[4]] + .[[5]] + .[[6]]) %>%  rename( `PUNTO.DE.MEDICIÓN` = Fecha) %>% 
   slice(1:5) %>% 
   {rbind(names %>%  select(PUNTO.DE.MEDICIÓN,`21588`,`21585`,`21586`,`21589`,`21590`,`21614`) %>%  mutate(suma = NA),.)} %>%
-  {knitr::kable(., caption = "Demanda - Tumbes")}
-
+  {knitr::kable(., caption = "Demand - Tumbes (Demanda - Tumbes)")}
 ```
 
-Como se puede apreciar tanto en la tabla e  como en las imágenes mostradas arriba, el punto de medición en la linea de tensión **Zorritos-Tumbes - LT6665A** ya contiene la suma de los puntos en Tumbes, Puerto Pizarro y Zarumilla.
+As seen in both the table and the images above, the measurement point (punto de medición) on the transmission line **Zorritos-Tumbes - LT6665A** already contains the sum of the points in Tumbes, Puerto Pizarro, and Zarumilla.
 
-## Procesamiento
+## Processing
 
+For this presentation, I will analyze two time intervals: 29 days before the start of the coronavirus quarantine (March 16, 2020) and the 29 days following it.
 
-Para esta presentación, analizaré dos intervalos de tiempo: 29 días antes del inicio de la cuarentena por el coronavirus (16 de marzo del 2020), y los 29 días siguientes.
+You can download the data I use from the [COES](http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2) website or directly from [here](https://github.com/luis-zapata-b/Datos/raw/master/datos.RDS).
 
-Puedes descargar los datos que utilizo desde la pagina web del [COES](http://www.coes.org.pe/Portal/DemandaBarras/consulta/index?tipo=2), o directamente desde [aquí](https://github.com/luis-zapata-b/Datos/raw/master/datos.RDS).
+The information can present a variety of issues:
 
+1. Missing values (valores omitidos).
+2. Incorrectly entered values (some numbers are multiplied by 10 or more).
+3. Outliers (irrationally different numbers that can persist for an entire day).
 
-La información puede presentar un sinfín de problemas:
-
-1. Valores omitidos.
-2. Valores incorrectamente ingresados (algunos números se ingresan multiplicados x10 o más).
-3. Valores atípicos (números irracionalmente diferentes que pueden durar todo un día).
-
-Como un ejemplo de como tratar con el primer tipo de error (valores omitidos) voy a utilizar los datos disponibles en **Tumbes** según mi categorización, en los cuales se pueden observar valores omitidos.
+### Handling missing values
+As an example of how to deal with the first type of error (missing values), I will use the data available for **Tumbes**, according to my categorization, where missing values can be observed.
 
 <center>
 
@@ -163,13 +175,25 @@ plotear %>%
   ggplot(aes(x=Fecha,y=gwh)) +
   geom_line() +
   facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22)))  +
-  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Tumbes",subtitle = "Según punto de medición de distribuidora. Valores omitidos presentes.")
+  labs(x = element_blank(),y="MW",title = "Electricity Consumption in Tumbes (Consumo eléctrico en Tumbes)",subtitle = "By measurement point (punto de medición) of distributor. Missing values (valores omitidos) present.")
 ```
 </center>
 
-Visualmente se aprecia que las series tienen distinta estacionalidad: hay horas durante el día en las que se consume más electricidad y hay días en los que se consume menos electricidad (como los fines de semana). 
+Visually, it is clear that the series exhibit different seasonality: there are hours during the day when more electricity is consumed and days when less electricity is consumed (such as weekends).
 
-Para poder imputar (llenar los valores ausentes) de la serie, primero debemos encontrar la frecuencia de estos efectos estacionales, para luego proceder a imputar en cada estacionalidad (por ejemplo, esta serie tiene una estacionalidad de 24 horas y otra de 7 días). El paquete [***ImputeR***](https://cran.r-project.org/web/packages/imputeR/index.html) nos permite hacer esto con la función *na_seasplit*. La teoría detrás de éste proceso no es el objetivo del análisis, sin embargo, recomiendo el libro [***"Forecasting: Principles and practice"***](https://otexts.com/fpp2/) de Rob Hyndman, así como su curso en [Data Camp](https://www.datacamp.com/courses/forecasting-using-r) si es que se quiere investigar más.
+To impute (fill missing values) in the series, we first need to determine the frequency of these seasonal effects and then proceed to impute within each seasonality (for example, this series has a seasonality of 24 hours and another of 7 days). The package [***ImputeR***](https://cran.r-project.org/web/packages/imputeR/index.html) allows us to do this using the *na_seasplit* function. 
+
+The `imputeTS` package in R is a powerful tool designed specifically for handling missing values in time series data. One of its key functions, `na_seasplit()`, is particularly effective for time series with strong seasonal patterns. 
+
+In this analysis, I chose `na_seasplit()` because it imputes missing values by splitting the time series into seasonal components, such as daily or weekly cycles. This approach ensures that the imputed values respect the inherent structure of the data. For example, electricity demand often exhibits predictable patterns based on the time of day or day of the week. By accounting for these patterns, `na_seasplit()` provides more realistic and accurate imputations compared to generic methods like mean or linear interpolation.
+
+This method is especially useful when:
+- Missing values occur in a regular seasonal context (e.g., during certain hours or days).
+- Maintaining the integrity of periodic fluctuations in the data is essential for accurate downstream analysis.
+
+Overall, the use of `imputeTS` and `na_seasplit()` demonstrates how specialized tools can enhance the reliability of results, particularly in domains like electricity demand analysis where seasonality plays a crucial role.
+
+The theory behind this process is not the focus of this analysis; however, I recommend the book [***"Forecasting: Principles and Practice"***](https://otexts.com/fpp2/) by Rob Hyndman and his course on [Data Camp](https://www.datacamp.com/courses/forecasting-using-r) for further exploration.
 
 <center>
 ```{r, echo=FALSE,warning=FALSE,message=FALSE}
@@ -203,17 +227,19 @@ ploteo2 %>%
   geom_line(aes(color=test),show.legend = FALSE) +
   facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
   scale_color_hue(l=40)  +
-  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Tumbes",subtitle = "Según punto de medición de distribuidora. Valores omitidos imputados.")
+  labs(x = element_blank(),y="MW",title = "Electricity Consumption in Tumbes (Consumo eléctrico en Tumbes)",subtitle = "By measurement point (punto de medición) of distributor. Missing values (valores omitidos) imputed.")
 ```
 </center>
 
-Como se observa en el gráfico, los valores omitidos han sido sustituidos tomando en cuenta la estacionalidad diaria y semanal de la serie. 
+As observed in the graph, the missing values (valores omitidos) have been replaced, considering both the daily and weekly seasonality of the series.
 
-Una opción más rápida sería la de sumar la data por día, e imputar considerando solo la estacionalidad diaria. Esta forma será la que utilizaremos en adelante, dado que nos permite evitar errores.
+A quicker option would be to aggregate the data by day and impute missing values considering only daily seasonality. This will be the method used moving forward, as it helps to avoid errors.
 
 ---
+### Addressing outliers
 
-Para tratar los errores de valores atípicos utilizo como ejemplo las mediciones en el departamento de Lambayeque según mi clasificación. Hay un valor atípico en el punto de medición **CAYALTI**, el cual muestra un consumo irracional por 1 día. 
+To address outliers (valores atípicos), I use the measurements in the Lambayeque department (departamento), according to my classification, as an example. There is an outlier in the measurement point (punto de medición) **CAYALTI**, which shows an irrational consumption for one day.
+
 <center>
 ```{r, echo=FALSE}
 plotear %>% 
@@ -227,24 +253,33 @@ plotear %>%
   facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
   scale_x_datetime(date_breaks = "23 days",date_labels = "%d-%b") +
   ggforce::geom_mark_ellipse(aes(filter=gwh > 300),fill="red") +
-  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Lambayeque",subtitle = "Según punto de medición de distribuidora. Valores atípicos presentes.")
-
+  labs(x = element_blank(),y="MW",title = "Electricity Consumption in Lambayeque (Consumo eléctrico en Lambayeque)",subtitle = "By measurement point (punto de medición) of distributor. Outliers (valores atípicos) present.")
 ```
 </center>
-Para evitar este tipo de error, utilizo dos filtros: 
 
-i) Primero, elimino cualquier valor que supere un consumo racional en el intervalo de medición de 30 minutos (por ejemplo, 300 MWh).
+Outliers can significantly distort analysis, especially in datasets with numerical values like electricity demand. 
+To avoid this type of error, I use two filters:
 
-ii) Segundo, elimino aquel valor que supere 4 veces la desviación estándar de cada serie. De esta forma, busco eliminar valores atípicos no recurrentes.
+i) First, I eliminate any value that exceeds a rational consumption within the 30-minute measurement interval (e.g., 300 MWh).
+
+ii) Second, I eliminate values that exceed 4 times the standard deviation of each series. This approach aims to remove non-recurrent outliers. This method works by identifying data points that deviate excessively from the average pattern of the series, which are likely to be errors or anomalies.
+
+This approach is effective because:
+- It adapts to the natural variability of each series, ensuring that normal fluctuations are not mistakenly removed.
+- The 4-standard-deviation threshold strikes a balance between sensitivity and robustness, capturing extreme outliers while retaining most valid data points (on a normal distribution, 99% of the values lie within 3 standart deviations).
+
+By applying this filter, I can clean the data in a systematic way, ensuring that the analysis focuses on meaningful trends without being skewed by extreme and unlikely values.
+
 
 ```{r}
 limite <- function(x) ifelse(x > 300,NA,x)
 scale2 <- function(x) ifelse(x > (median(x,na.rm = TRUE) + (4 * sd(x,na.rm = TRUE))),NA,x)
 ```
 
-Se puede apreciar en la siguiente imagen, como los valores atípicos en **CAYALTI** fueron eliminados, y posteriormente se ha hecho una imputación del valor omitido para rellenar la serie.
+In the following image, it can be observed how the outliers (valores atípicos) in **CAYALTI** were removed, and subsequently, the missing value was imputed to fill the series.
 
-Sin embargo, en el punto **TUMÁN** todavía existe un tercer tipo de error, es decir, un día arbitrariamente la data comenzó a registrarse en una escala errónea (multiplicada por 100).
+However, at the point **TUMÁN**, a third type of error is still present: for one day, the data was arbitrarily recorded at an incorrect scale (multiplied by 100).
+
 <center>
 ```{r, echo=FALSE}
 ploteo2 %>% 
@@ -258,15 +293,17 @@ ploteo2 %>%
   facet_wrap(scales = "free",.~ PUNTO.DE.MEDICIÓN,labeller = labeller(PUNTO.DE.MEDICIÓN = label_wrap_gen(22))) +
   scale_x_datetime(date_breaks = "23 days",date_labels = "%d-%b") +
   ggforce::geom_mark_ellipse(aes(filter=gwh > 30),fill="red")  +
-  labs(x = element_blank(),y="MW",title = "Consumo eléctrico en Lambayeque",subtitle = "Según punto de medición de distribuidora. Valores atípicos imputados")
-
+  labs(x = element_blank(),y="MW",title = "Electricity Consumption in Lambayeque (Consumo eléctrico en Lambayeque)",subtitle = "By measurement point (punto de medición) of distributor. Outliers (valores atípicos) imputed.")
 ```
 </center>
-La única forma de corregir este tipo de errores es revisar visualmente las series y corregirlas manualmente. 
-Este tipo de valores atípicos puede afectar la interpretación de nuestra data. Por ejemplo, al analizar la demanda por departamento, el error de medición de Lambayeque nos puede conducir a una interpretación errónea.
 
-<center>
-```{r, echo=FALSE,warning=FALSE}
+The only way to correct this type of error is to visually inspect the series and manually adjust them.  
+These types of outliers can affect the interpretation of our data. For example, when analyzing demand by department (departamento), the measurement error in Lambayeque could lead to a misinterpretation.
+
+This code processes electricity consumption data by cleaning, normalizing, and imputing missing values while addressing outliers to prepare it for analysis and visualization. It groups data by date and department, summing electricity demand across all relevant points of measurement for each department. Seasonal imputation (`na_seasplit`) is applied to ensure smooth trends, and outliers are handled using scaling and thresholding. Finally, it generates a faceted plot showing electricity consumption trends for each department, marking the impact of quarantine (March 15, 2020) and highlighting any anomalies, such as the outlier in Lambayeque. It does this by aggregating all the points of measurement per department.
+
+
+```{r, echo=TRUE,warning=FALSE}
 cont = z %>%
   mutate_if(is.character,as.double) %>%
   mutate(Fecha = as_date(PUNTO.DE.MEDICIÓN - minutes(30))) %>%
@@ -281,8 +318,7 @@ cont = z %>%
 
 ```
 
-```{r,warning=FALSE,echo=FALSE,message=FALSE}
-
+```{r,warning=FALSE,echo=TRUE,message=FALSE}
 pordepa= cont %>%
   {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
   {.[, which(colMeans(.!= 0,na.rm = TRUE) > 0.5)]} %>%
@@ -308,11 +344,10 @@ factorizar = pordepa %>%
 nombres = mutate(nombres,DEPARTAMENTO = ifelse(nombres$DEPARTAMENTO %in% factorizar[[1]],DEPARTAMENTO,"OTROS"))
 
 ```
-
-```{r,warning=FALSE,echo=FALSE,message=FALSE}
+<center>
+```{r,warning=FALSE,echo=TRUE,message=FALSE}
 cont %>%
   {.[, which(colMeans(!is.na(.)) > 0.5)]} %>%
-  # {.[, which(colMeans(.!= 0,na.rm = TRUE) > 0.5)]} %>%
    group_by(Fecha2) %>% 
   ungroup() %>% 
   mutate_at(vars(-c(Fecha,Fecha2)), funs(. / 2000)) %>%
@@ -325,22 +360,38 @@ cont %>%
     mutate(gwh = na_seasplit(gwh,find_frequency = TRUE)) %>% 
   ungroup() %>%
   ggplot(aes(x=Fecha, y =gwh)) +
-   # geom_area(aes(fill = factor(DEPARTAMENTO,levels = factorizar[[1]]))color="black",position = "stack") +
   geom_line() +
   facet_wrap(.~factor(DEPARTAMENTO,levels = rev(factorizar[[1]])),scales = "free_y") +
   scale_x_date(date_breaks = "1 weeks",date_labels = "%d-%b",expand = c(0,0)) +
   geom_vline(xintercept = as_date("2020-03-15"),size=1.5,linetype="dashed") +
-  labs(title = "Consumo Eléctrico - Empresas Distribuidoras",subtitle = "Consumo eléctrico medido en estaciones de propiedad de empresas distribuidoras.",
-       y = element_blank(),x=element_blank(),fill="Departamento", caption = "Fuente: COES. Autor: Luis José Zapata Bobadilla.") +
+  labs(title = "Electricity Consumption - Distribution Companies (Consumo Eléctrico - Empresas Distribuidoras)",subtitle = "Electricity consumption measured at stations owned by distribution companies (empresas distribuidoras).",
+       y = element_blank(),x=element_blank(),fill="Department (Departamento)", caption = "Source: COES. Author: Luis José Zapata Bobadilla.") +
   theme_gray()+
   theme(axis.text.x.bottom = element_text(angle = 90,hjust=0.7)) +
   ggforce::geom_mark_ellipse(aes(filter=(gwh > 4)&(DEPARTAMENTO=="LAMBAYEQUE")),fill="red")
-
 ```
 </center>
-Una forma efectiva de solucionar este problema, es no tomar en cuenta cada punto de medición, sino aquel punto de medición que suma a la mayoría de puntos de medición por departamento (así como el punto Zorritos - Tumbes en el ejemplo anterior).
 
-Mucha información que se mide en el sistema es redundante, es decir, se repite. A medida que se tengan más puntos de medición, la información redundante en cada departamento aumenta exponencialmente. Si se suman la demanda por departamento sin realizar ningún filtro, algunos departamentos pueden mostrar un consumo mayor al real. Este es el caso de Lima en nuestra data.
+#### Key Observations:
+1. **General Trends Across Departments**:
+   - All departments show a clear decrease in electricity consumption after March 16, 2020, reflecting the impact of quarantine measures on economic activity.
+   - Departments like **Lima** and **Piura**, which contribute heavily to overall electricity demand, show a substantial drop.
+
+2. **Notable Patterns**:
+   - The periodic spikes suggest weekly consumption cycles, particularly visible in regions like **Lima** and **Piura**.
+
+3. **Outlier in Lambayeque**:
+   - The **Lambayeque** panel highlights an outlier (shaded red) after March 30, indicating a data registration error where recorded consumption was unrealistically high. This emphasizes the need for thorough data cleaning and verification to ensure accurate analysis.
+
+4. **Consistency of Patterns**:
+   - While the drop after quarantine is expected, the consistent patterns across departments highlight the robustness of the recorded trends, aside from the noted outlier in Lambayeque, when we aggregate by points of measurement.
+
+### Addressing redudant information
+A large portion of the information measured in the system is redundant, meaning it is repeated. As more measurement points (puntos de medición) are added, the redundant information in each department (departamento) increases exponentially. If demand is summed by department without applying any filters, some departments may display consumption higher than the actual values. This is the case for Lima in our dataset.
+
+An effective way to address this problem is to exclude every measurement point (punto de medición) and instead focus only on those points that sum the majority of the measurement points in each department (departamento), as seen with the Zorritos - Tumbes point in the earlier example.
+
+
 <center>
 ```{r,warning=FALSE,echo=FALSE}
 cont %>%
@@ -361,31 +412,60 @@ cont %>%
   geom_area(aes(fill=factor(DEPARTAMENTO,levels = (factorizar[[1]]))),color="black") +
    scale_x_date(date_breaks = "1 weeks",date_labels = "%d-%b",expand = c(0,0)) +
   geom_vline(xintercept = as_date("2020-03-15"),size=1.5,linetype="dashed") +
-  labs(title = "Consumo Eléctrico - Empresas Distribuidoras",subtitle = "Consumo eléctrico medido en estaciones de propiedad de empresas distribuidoras.",
-       y = element_blank(),x=element_blank(),fill="Departamento", caption = "Fuente: COES. Autor: Luis José Zapata Bobadilla.") +
+  labs(title = "Electricity Consumption - Distribution Companies (Consumo Eléctrico - Empresas Distribuidoras)",subtitle = "Electricity consumption measured at stations owned by distribution companies (empresas distribuidoras).",
+       y = element_blank(),x=element_blank(),fill="Department (Departamento)", caption = "Source: COES. Author: Luis José Zapata Bobadilla.") +
   theme_gray() +
   theme(axis.text.x.bottom = element_text(angle = 90,hjust=0.7))
-
 ```
 </center>
-## Conclusión
+The plot provides a visual representation of the changes in demand over time, categorized by department.
 
-Como se mencionó antes, la mejor manera de evitar este tipo de problemas es considerar únicamente los puntos de medición que agrupan a la mayor cantidad de puntos de medición (como el punto Zorritos - Tumbes).
+### Key Observations:
+1. **Temporal Trends**:
+   - The x-axis represents dates, ranging from mid-February to mid-April, showing daily electricity consumption.
+   - There is a noticeable decrease in electricity demand starting around **March 16, 2020**, marked by the vertical dashed line. This corresponds to the start of the COVID-19 quarantine period in Peru, reflecting reduced industrial and business activity.
 
-Para realizar esto se requiere un conocimiento por región de cuales son los puntos que agrupan a los demás. Esto se puede hacer revisando el mapa unifilar del COES. 
+2. **Departmental Breakdown**:
+   - The stacked area chart highlights the contribution of each department to the total electricity demand.
+   - **Lima (pink)** consistently accounts for the largest share of electricity consumption, reflecting its role as the country's economic hub.
+   - Other significant contributors include **Piura (blue)**, **La Libertad (green)**, and **Arequipa (teal)**.
 
-Se debe identificar cuales son los puntos de medición relevantes (que eviten redundancias) en cada Región. 
+3. **Impact of Quarantine**:
+   - The reduction in demand after March 16 is visible across all departments, with a sharp decline in Lima and noticeable decreases in other regions like Arequipa and Lambayeque.
+   - Smaller departments grouped under "OTROS" (Others) also show a slight decline, though their contribution to overall demand is relatively small.
 
-Este es un trabajo pendiente y que permitiría realizar un análisis confiable por departamento.
+4. **Seasonal or Weekly Patterns**:
+   - The wavelike structure in the plot suggests periodic fluctuations, likely driven by weekday-weekend patterns in electricity usage.
 
-Cabe resaltar que el COES ya publica la información compiladas de 3 zonas del Perú  (Norte, Centro y Sur) en su Informe de Evaluación diaria ([IEOD](https://www.coes.org.pe/Portal/PostOperacion/Reportes/Ieod)) en la hoja "**Demanda por zona**". Por lo tanto, si lo que se busca es la información compilada por esas zonas, es más fácil descargarlo de la página del COES. 
+### Insights:
+This plot effectively demonstrates how a major event (quarantine) can impact electricity demand across different regions. It highlights the significance of Lima and other key regions while showcasing how such analyses in real time can provide actionable insights for policymakers and energy planners.
 
-Al contrario, si el interés es tener la información por departamento, el acercamiento visto en este análisis sería el correcto.
+## Conclusion
+
+As mentioned earlier, the best way to avoid these types of problems is to focus solely on measurement points (puntos de medición) that aggregate the majority of other points (such as the Zorritos - Tumbes point).
+
+To achieve this, it is necessary to have regional knowledge of which points aggregate others. This can be done by reviewing the single-line diagram (diagrama unifilar) from COES.
+
+It is essential to identify the relevant measurement points (puntos de medición) that prevent redundancies in each region. 
+
+This is a pending task that would enable a reliable analysis by department (departamento).
+
+It is worth noting that COES already publishes compiled information for three zones of Peru (North, Central, and South) in its Daily Evaluation Report ([IEOD](https://www.coes.org.pe/Portal/PostOperacion/Reportes/Ieod)) under the sheet "**Demand by Zone**" (Demanda por zona). Therefore, if the goal is to obtain compiled information for these zones, it is easier to download it directly from the COES website.
+
+However, if the objective is to analyze the information by department, the approach outlined in this analysis would be the most appropriate.
+
+This analysis illustrates my proficiency in data cleaning, statistical modeling, and visualization using R, along with my ability to adapt to technical topics like electricity distribution systems.
+
+All the files used in this analysis can be downloaded from the following link:  
+[https://github.com/luis-zapata-b/Datos/archive/master.zip](https://github.com/luis-zapata-b/Datos/archive/master.zip)
 
 
-Todos los archivos en este análisis puede ser descargados del siguiente enlace:
-https://github.com/luis-zapata-b/Datos/archive/master.zip
+### Final Conclusion
 
+This analysis highlights the critical role of data-driven methodologies in understanding electricity demand at the regional level, emphasizing its importance for policy-making, investment decisions, and sustainability efforts. By addressing key challenges such as redundant data, missing values, and outliers, the approach presented ensures accurate and actionable insights into energy consumption trends across Peru's departments.
 
+The results demonstrate how external factors, like the COVID-19 quarantine, can significantly impact electricity demand, with clear patterns observed across major regions like Lima, Piura, and Lambayeque. Moreover, the use of advanced imputation methods and outlier filtering techniques underscores the importance of rigorous data preparation in ensuring reliable conclusions.
 
+The mechanism developed in this study not only provides valuable insights into regional electricity consumption but also establishes a reproducible framework. By leveraging publicly available data from COES, this methodology can be replicated and scaled for future analyses, supporting government efforts to optimize resource allocation and plan for sustainable energy systems.
 
+Overall, this project showcases the integration of technical expertise in R, critical thinking, and adaptability to complex topics, demonstrating a robust foundation for tackling real-world challenges in resource management and energy analysis.
